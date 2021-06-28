@@ -17,6 +17,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import accuracy_score
 
 #cache the stock tickers so they don't have to load everytime
 @st.cache
@@ -180,7 +181,10 @@ def predict(data, move_days=7):
     rf.fit(X_train, y_train)
     y_pred_existing=rf.predict(X_test)
     MSE = mean_squared_error(y_test, y_pred_existing)
-    
+
+    # View accuracy score
+    score = rf.score(X_test, y_pred_existing)
+
     # Now the X variable is going to be the features for the days where we have no "in x Days price"
     last_days=data.tail(move_days)
     X_pred=last_days.drop(['shift_close','Date'],1)
@@ -190,11 +194,12 @@ def predict(data, move_days=7):
     #predicted_dates = data['Date']
     last_days['shift_close'] = pred
     
-    return last_days, MSE
-predicted, MSE =predict(data)
+    return last_days, MSE, score
+predicted, MSE, score =predict(data)
 
 st.write('Predicted values')
 st.write(predicted[['Date','shift_close']])
 
 
 st.write('MSE:' + str(MSE))
+st.write('Score:' + str(score))
