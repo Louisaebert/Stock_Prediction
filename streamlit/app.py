@@ -40,7 +40,9 @@ st.header('Using ML to predict the Stock Market')
 st.subheader('A Big Data Project by Valeriia, Louisa and Alexander')
 fin = st.sidebar.checkbox('Display company financials?')
 show_news = st.sidebar.checkbox('Display company news?')
-timeframe = st.sidebar.selectbox('Select period:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
+timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
+predictframe = st.sidebar.selectbox('Select days to predict:',[1,2,3,4,5,6,7])
+go = st.sidebar.button("Predict!")
 slct = st.selectbox('Select your stock:',ticks, index = ticks.index("TSLA"))
 
 #get the stock data from selected ticker
@@ -63,35 +65,36 @@ _=plt.xlabel("Date")
 _=plt.ylabel("Opening")
 st.pyplot()
 
-#fetch and add company news
-finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
-result=(finnhub_client.company_news(slct, _from="2020-11-15", to="2021-06-03"))
-news=pd.DataFrame(result)
-for i in range(news.shape[0]):
-    news.datetime[i]= datetime.utcfromtimestamp(news.datetime[i]).strftime('%Y-%m-%d')
-try:
-    news['datetime']=news['datetime'].astype('datetime64[ns]')
-    df=news.merge(hist,on='datetime',how="left")
-    for i in range(df.shape[0]):
-        df.summary[i] = strip_numeric(df.summary[i])
-        df.summary[i] = strip_punctuation(df.summary[i])
-        df.summary[i] = strip_multiple_whitespaces(df.summary[i])
-        df.summary[i] = df.summary[i].lower()
-        
-    for i in range(df.shape[0]):
-        df.headline[i] = strip_numeric(df.headline[i])
-        df.headline[i] = strip_punctuation(df.headline[i])
-        df.headline[i] = strip_multiple_whitespaces(df.headline[i])
-        df.headline[i] = df.headline[i].lower()
-        
-    sid = sia()
-    df['sentiment_vd_headline'] = df['headline'].apply(lambda headline: sid.polarity_scores(headline)['compound'])
-    df['sentiment_vd_summary'] = df['summary'].apply(lambda summary: sid.polarity_scores(summary)['compound'])
-    st.write("Sentiment analysis of headlines:", df.sentiment_vd_headline.mean())
-    st.write("Sentiment analysis of summary:", df.sentiment_vd_summary.mean())
-    
-except:
-    st.write("No sentiment analysis possible")
+with st.spinner(text='Fetching news ...'):
+    #fetch and add company news
+    finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
+    result=(finnhub_client.company_news(slct, _from="2020-11-15", to="2021-06-03"))
+    news=pd.DataFrame(result)
+    for i in range(news.shape[0]):
+        news.datetime[i]= datetime.utcfromtimestamp(news.datetime[i]).strftime('%Y-%m-%d')
+    try:
+        news['datetime']=news['datetime'].astype('datetime64[ns]')
+        df=news.merge(hist,on='datetime',how="left")
+        for i in range(df.shape[0]):
+            df.summary[i] = strip_numeric(df.summary[i])
+            df.summary[i] = strip_punctuation(df.summary[i])
+            df.summary[i] = strip_multiple_whitespaces(df.summary[i])
+            df.summary[i] = df.summary[i].lower()
+
+        for i in range(df.shape[0]):
+            df.headline[i] = strip_numeric(df.headline[i])
+            df.headline[i] = strip_punctuation(df.headline[i])
+            df.headline[i] = strip_multiple_whitespaces(df.headline[i])
+            df.headline[i] = df.headline[i].lower()
+
+        sid = sia()
+        df['sentiment_vd_headline'] = df['headline'].apply(lambda headline: sid.polarity_scores(headline)['compound'])
+        df['sentiment_vd_summary'] = df['summary'].apply(lambda summary: sid.polarity_scores(summary)['compound'])
+        st.write("Sentiment analysis of headlines:", df.sentiment_vd_headline.mean())
+        st.write("Sentiment analysis of summary:", df.sentiment_vd_summary.mean())
+
+    except:
+        st.write("No sentiment analysis possible")
 
 #show additional info if checkbox in sidebar is checked
 if show_news == True:
@@ -153,14 +156,15 @@ def get_recommendation_trends(company):
     df['Date'] = pd.to_datetime(df['period_x'], format='%Y-%m-%d')
     return df.drop(['period_x'],1)
 
-add_all_ta_features(
-    hist, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+with st.spinner(text='Fetching additional data ...'):
+    add_all_ta_features(
+        hist, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
 
-news_df = get_news(slct)
-trend_df = get_recommendation_trends(slct)
-data = hist.merge(news_df, how='inner', on='Date').merge(trend_df, how='inner', on='Date').drop(['symbol','datetime_y','datetime_x'],1)
-st.write('Data to train the model on')
-st.write(data)
+    news_df = get_news(slct)
+    trend_df = get_recommendation_trends(slct)
+    data = hist.merge(news_df, how='inner', on='Date').merge(trend_df, how='inner', on='Date').drop(['symbol','datetime_y','datetime_x'],1)
+    st.write('Data to train the model on')
+    st.write(data)
 
 def predict(data, move_days=7):
     # shifted values column, like this the model can learn what the price is going to be x days later
@@ -195,11 +199,31 @@ def predict(data, move_days=7):
     last_days['shift_close'] = pred
     
     return last_days, MSE, score
-predicted, MSE, score =predict(data)
 
-st.write('Predicted values')
-st.write(predicted[['Date','shift_close']])
+if go == True:
+    with st.spinner(text='Calculating prediction ...'):
+        predicted, MSE, score =predict(data, move_days=predictframe)
+
+        #setting the index to date
+        predicted.index = predicted.Date
+
+        #shifting it forward for x days (still need to combine this with a toggle, same as move_days for prediction)
+        predicted.index = predicted.index.shift(predictframe, freq = "D")
+        st.write('Predicted values')
+        st.write(predicted[['Date','shift_close']])
 
 
-st.write('MSE:' + str(MSE))
-st.write('Score:' + str(score))
+        st.write('MSE:' + str(MSE))
+        st.write('Score:' + str(score))
+
+        #joining with the historicaL data to create a subframe with just the new dates then appending that to the rest of the data but only take last 20 entries, sorted by date
+        graph = hist.append(hist.join(predicted[["Date", "shift_close"]], how= 'right')).sort_index().tail(20)
+
+        #plotting
+        _=plt.plot(graph.index,graph['shift_close'], label = "Prediction")
+        _=plt.plot(graph.index,graph["Close"], label = "Historical data")
+        _=plt.legend()
+        _=plt.xticks(rotation=70)
+        _=plt.xlabel("Date")
+        _=plt.ylabel("Close")
+        st.pyplot()
