@@ -1,10 +1,8 @@
 import streamlit as st
 import yfinance as yf
-import matplotlib.pyplot as plt
+import plotly.express as px
 import pandas as pd
 import numpy as np
-#https://github.com/portfolioplus/pytickersymbols
-from pytickersymbols import PyTickerSymbols
 import finnhub
 from datetime import datetime
 import nltk 
@@ -21,31 +19,45 @@ from sklearn.metrics import accuracy_score
 
 #cache the stock tickers so they don't have to load everytime
 @st.cache
-def get_ticker():
-    stock_data = PyTickerSymbols()
-    indices = stock_data.get_all_indices()
+def get_ticker(market = "US"):
     tickers = []
-    for index in indices:
-        tickers.append(stock_data.get_yahoo_ticker_symbols_by_index(index))
-    tickers_flat = [item for sublist in tickers for item in sublist]
-    tickers_flater = [item for sublist in tickers_flat for item in sublist]
-    return sorted(tickers_flater)
+    t = finnhub_client.stock_symbols(market)
+    for ticker in t:
+        tickers.append(ticker["displaySymbol"])
+    
+    return tickers
 
-#fetch all tickers
-ticks = get_ticker()
-ticks = list(np.unique(ticks))
+#set up finnhub client
+finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
+
 
 #streamlit interactibles and headings
 st.header('Using ML to predict the Stock Market')
 st.subheader('A Big Data Project by Valeriia, Louisa and Alexander')
-fin = st.sidebar.checkbox('Display company financials?')
 show_news = st.sidebar.checkbox('Display company news?')
 timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
-predictframe = st.sidebar.selectbox('Select days to predict:',[1,2,3,4,5,6,7])
+predictframe = st.sidebar.slider('Select days to predict:',min_value=1, max_value = 7, value=7)
 go = st.sidebar.button("Predict!")
-slct = st.selectbox('Select your stock:',ticks, index = ticks.index("TSLA"))
 
-#get the stock data from selected ticker
+
+#With this part, the user can choose the desired stock market he wants to view, however, US market works best because it has the most data from finnhub so we're limiting it to US
+#markets = ["AS","AT","AX","BA","BC","BD","BE","BK","BO","BR","CN","CO","CR","DB","DE","DU","F","HE","HK","HM","IC","IR","IS","JK","JO","KL","KQ","KS","L","LN","LS","MC","ME","MI","MU","MX","NE","NL","NS","NZ","OL","PA","PM","PR","QA","RG","SA","SG","SI","SN","SR","SS","ST","SW","SZ","T","TA","TL","TO","TW","US","V","VI","VN","VS","WA","HA","SX","TG","SC"]
+#market = st.sidebar.selectbox('Select market:', markets, index = markets.index("US"))
+
+#fetch all tickers and get index of TSLA as starting point for US market
+ticks = get_ticker()
+ticks = list(np.unique(ticks))
+
+#try except is in case there would be a different market selected
+try:
+    index = ticks.index("TSLA")
+except:
+    index = 0
+
+#Select the desired stock from the market and get stock data from yfinance
+slct = st.selectbox('Select your stock:',ticks, index = index)
+
+#Maybe possible to cache this, however, as stocks are constantly changing, it's kept as-is so that a refresh always shows the newest data 
 def get_stock(slct):
     stock = yf.Ticker(slct)
     return stock
@@ -59,15 +71,11 @@ hist.reset_index()
 hist['datetime']=hist['datetime'].astype('datetime64[ns]')
 
 #plot historical data
-st.set_option('deprecation.showPyplotGlobalUse', False)
-_=plt.plot(hist.datetime, hist["Open"])
-_=plt.xlabel("Date")
-_=plt.ylabel("Opening")
-st.pyplot()
+fig = px.line(hist, x="datetime", y="Close", title=f'Closing Price of {slct}', labels = {"datetime":"Date", "Close":"Closing Price [$]"},template = 'seaborn')
+st.plotly_chart(fig)
 
 with st.spinner(text='Fetching news ...'):
     #fetch and add company news
-    finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
     result=(finnhub_client.company_news(slct, _from="2020-11-15", to="2021-06-03"))
     news=pd.DataFrame(result)
     for i in range(news.shape[0]):
@@ -102,10 +110,6 @@ if show_news == True:
         st.write(news.headline)
     except:
         st.write("No news available. Look for a more interesting stock.")
-
-if fin == True:
-    st.write(stock.financials)
-
 
 
 # building the data for prediction
@@ -207,7 +211,7 @@ if go == True:
         #setting the index to date
         predicted.index = predicted.Date
 
-        #shifting it forward for x days (still need to combine this with a toggle, same as move_days for prediction)
+        #shifting it back forward for x days
         predicted.index = predicted.index.shift(predictframe, freq = "D")
         st.write('Predicted values')
         st.write(predicted[['Date','shift_close']])
@@ -218,12 +222,10 @@ if go == True:
 
         #joining with the historicaL data to create a subframe with just the new dates then appending that to the rest of the data but only take last 20 entries, sorted by date
         graph = hist.append(hist.join(predicted[["Date", "shift_close"]], how= 'right')).sort_index().tail(20)
+        graph.rename(columns = {"shift_close":"Prediction", "Close":"Historical Data"}, inplace = True)
 
         #plotting
-        _=plt.plot(graph.index,graph['shift_close'], label = "Prediction")
-        _=plt.plot(graph.index,graph["Close"], label = "Historical data")
-        _=plt.legend()
-        _=plt.xticks(rotation=70)
-        _=plt.xlabel("Date")
-        _=plt.ylabel("Close")
-        st.pyplot()
+        fig2 = px.line(graph, x=graph.index, y=["Historical Data","Prediction"], title=f'Predicted closing price for {slct}', labels = {"index":"Date"}, template = 'seaborn', range_x = [min(graph.index),max(graph.index.shift(1, freq = "D"))])
+        fig2.update_traces(mode='markers+lines')
+        fig2.update_layout(xaxis_title='Date', yaxis_title='Closing Price [$]')
+        st.plotly_chart(fig2)
