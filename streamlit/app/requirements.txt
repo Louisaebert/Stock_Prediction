@@ -1,6 +1,6 @@
 streamlit 
 yfinance 
-matplotlib
+plotly
 pandas 
 numpy 
 finnhub
