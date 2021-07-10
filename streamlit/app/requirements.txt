@@ -3,10 +3,10 @@ yfinance
 plotly
 pandas 
 numpy 
-finnhub
 datetime
 nltk 
 gensim
 ta
 sklearn
-request 
+requests 
+finnhub-python

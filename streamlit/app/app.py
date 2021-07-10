@@ -5,7 +5,8 @@ import pandas as pd
 import numpy as np
 import finnhub
 from datetime import datetime
-import nltk 
+import nltk
+from time import speed
 from nltk.sentiment.vader import SentimentIntensityAnalyzer as sia
 nltk.download("vader_lexicon")
 from gensim.parsing.preprocessing import STOPWORDS, strip_tags, strip_numeric, strip_punctuation, strip_multiple_whitespaces, remove_stopwords, strip_short, stem_text
