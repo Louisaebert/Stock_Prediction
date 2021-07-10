@@ -37,7 +37,7 @@ finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
 st.header('Using ML to predict the Stock Market')
 st.subheader('A Big Data Project by Valeriia, Louisa and Alexander')
 show_news = st.sidebar.checkbox('Display company news?')
-timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
+#timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
 predictframe = st.sidebar.slider('Select days to predict:',min_value=1, max_value = 7, value=7)
 
 
