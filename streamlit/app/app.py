@@ -6,7 +6,7 @@ import numpy as np
 import finnhub
 from datetime import datetime
 import nltk
-from time import speed
+#from time import speed
 from nltk.sentiment.vader import SentimentIntensityAnalyzer as sia
 nltk.download("vader_lexicon")
 from gensim.parsing.preprocessing import STOPWORDS, strip_tags, strip_numeric, strip_punctuation, strip_multiple_whitespaces, remove_stopwords, strip_short, stem_text
@@ -17,6 +17,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score
+from yahoo_fin.stock_info import get_data
 
 #cache the stock tickers so they don't have to load everytime
 @st.cache
@@ -38,7 +39,7 @@ st.subheader('A Big Data Project by Valeriia, Louisa and Alexander')
 show_news = st.sidebar.checkbox('Display company news?')
 timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
 predictframe = st.sidebar.slider('Select days to predict:',min_value=1, max_value = 7, value=7)
-go = st.sidebar.button("Predict!")
+
 
 
 #With this part, the user can choose the desired stock market he wants to view, however, US market works best because it has the most data from finnhub so we're limiting it to US
@@ -63,58 +64,27 @@ def get_stock(slct):
     stock = yf.Ticker(slct)
     return stock
   
-stock = get_stock(slct)
+#stock = get_stock(slct)
 
 #take historical data from stock in desired timeframe
-hist = stock.history(period = timeframe)
-hist['datetime']=hist.index
-hist.reset_index()
-hist['datetime']=hist['datetime'].astype('datetime64[ns]')
+#hist = stock.history(period = timeframe) #yahoo does not work,unstable
 
-#plot historical data
-fig = px.line(hist, x="datetime", y="Close", title=f'Closing Price of {slct}', labels = {"datetime":"Date", "Close":"Closing Price [$]"},template = 'seaborn')
-st.plotly_chart(fig)
+try:
+    hist=get_data(slct, start_date = None, end_date = None, index_as_date = False, interval = "1d")
+    st.write(hist)
+    #plot historical data
+    fig = px.line(hist, x="date", y="close", title=f'Closing Price of {slct}', labels = {"date":"Date", "close":"Closing Price [$]"},template = 'seaborn')
+    st.plotly_chart(fig)
 
-with st.spinner(text='Fetching news ...'):
-    #fetch and add company news
-    result=(finnhub_client.company_news(slct, _from="2020-11-15", to="2021-06-03"))
-    news=pd.DataFrame(result)
-    for i in range(news.shape[0]):
-        news.datetime[i]= datetime.utcfromtimestamp(news.datetime[i]).strftime('%Y-%m-%d')
-    try:
-        news['datetime']=news['datetime'].astype('datetime64[ns]')
-        df=news.merge(hist,on='datetime',how="left")
-        for i in range(df.shape[0]):
-            df.summary[i] = strip_numeric(df.summary[i])
-            df.summary[i] = strip_punctuation(df.summary[i])
-            df.summary[i] = strip_multiple_whitespaces(df.summary[i])
-            df.summary[i] = df.summary[i].lower()
+except:
+    st.write('no financial historical data for selected company')
 
-        for i in range(df.shape[0]):
-            df.headline[i] = strip_numeric(df.headline[i])
-            df.headline[i] = strip_punctuation(df.headline[i])
-            df.headline[i] = strip_multiple_whitespaces(df.headline[i])
-            df.headline[i] = df.headline[i].lower()
-
-        sid = sia()
-        df['sentiment_vd_headline'] = df['headline'].apply(lambda headline: sid.polarity_scores(headline)['compound'])
-        df['sentiment_vd_summary'] = df['summary'].apply(lambda summary: sid.polarity_scores(summary)['compound'])
-        st.write("Sentiment analysis of headlines:", df.sentiment_vd_headline.mean())
-        st.write("Sentiment analysis of summary:", df.sentiment_vd_summary.mean())
-
-    except:
-        st.write("No sentiment analysis possible")
-
-#show additional info if checkbox in sidebar is checked
-if show_news == True:
-    try:
-        st.write(news.headline)
-    except:
-        st.write("No news available. Look for a more interesting stock.")
+#hist['datetime']=hist.index
+#hist.reset_index()
+#hist['datetime']=hist['datetime'].astype('datetime64[ns]')
 
 
-# building the data for prediction
-def get_news(company, date_from='2021-06-01', date_to=None):
+def get_news(company, date_from='2021-01-01', date_to=None):
     '''
     returns dataframe with average sentiment of news headline and sentiment of news summary for every date in a given timeframe
     company: symbol, example ZM
@@ -134,8 +104,32 @@ def get_news(company, date_from='2021-06-01', date_to=None):
     
     news_dates = news_df.groupby(['datetime']).mean().sort_index().reset_index()
 
-    news_dates['Date'] = pd.to_datetime(news_dates['datetime'], format='%Y-%m-%d')
-    return news_dates
+    news_dates['date'] = pd.to_datetime(news_dates['datetime'], format='%Y-%m-%d')
+    return news_df, news_dates
+
+with st.spinner(text='Fetching news ...'):
+    #fetch and add company news
+    today = datetime.today().strftime("%Y-%m-%d")
+    month_ago = (datetime.today() - pd.offsets.DateOffset(months=1)).strftime("%Y-%m-%d")
+    try:
+        news,news_df=get_news(slct, month_ago,today)
+        st.header('News sentiment')
+        st.write('Sentiment is represented by a score in a range from -1 to 1, whereas -1 means negative and 1 means positive')
+        st.write("`Average Sentiment score of news headlines for the last month:", news.headline_sentiment.mean())
+        st.write("`Average Sentiment score of news summaries for the last month:", news.summary_sentiment.mean())
+    except:
+        st.write("No sentiment analysis possible")
+
+#show additional info if checkbox in sidebar is checked
+if show_news == True:
+    try:
+        st.write(news.headline)
+    except:
+        st.write("No news available. Look for a more interesting stock.")
+
+
+# building the data for prediction
+
 
 
 def get_recommendation_trends(company):
@@ -158,24 +152,31 @@ def get_recommendation_trends(company):
     df.period = [datetime.strftime(x, '%Y-%m-%d') for x in df.period]
     df = df.merge(recommendation_df,how='left', left_on='month', right_on='period')
     df.drop(['month','period_y'], axis=1, inplace=True)
-    df['Date'] = pd.to_datetime(df['period_x'], format='%Y-%m-%d')
+    df['date'] = pd.to_datetime(df['period_x'], format='%Y-%m-%d')
     return df.drop(['period_x'],1)
 
 with st.spinner(text='Fetching additional data ...'):
-    add_all_ta_features(
-        hist, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+    
 
-    news_df = get_news(slct)
-    trend_df = get_recommendation_trends(slct)
-    data = hist.merge(news_df, how='inner', on='Date').merge(trend_df, how='inner', on='Date').drop(['symbol','datetime_y','datetime_x'],1)
-    st.write('Data to train the model on')
-    st.write(data)
-
+    #st.write(news_df)
+    try:
+        trend_df = get_recommendation_trends(slct)
+    except:
+        st.write('no recommendation trends available')
+    #st.write(trend_df)
+    try:
+        add_all_ta_features(
+            hist, open="open", high="high", low="low", close="close", volume="volume", fillna=True)
+        data = hist.merge(news_df, how='inner', on='date').merge(trend_df, how='inner', on='date').drop(['symbol'],1)
+        st.write('Data to train the model on')
+        st.write(data)
+    except:
+        st.write('Not enough data')
 def predict(data, move_days=7):
     # shifted values column, like this the model can learn what the price is going to be x days later
-    data["shift_close"]=data[["Close"]].shift(-move_days)
+    data["shift_close"]=data[["close"]].shift(-move_days)
     #x without the NaNs 
-    X = data.drop(['shift_close','Date'],1)[:-move_days]
+    X = data.drop(['shift_close','date','ticker','datetime'],1)[:-move_days]
     y = data[['shift_close']][:-move_days]
     X_train, X_test, y_train, y_test=train_test_split(X,y,test_size=0.2)
 
@@ -189,44 +190,52 @@ def predict(data, move_days=7):
     rf=RandomForestRegressor(min_samples_leaf=params['min_samples_leaf'], n_estimators=params['n_estimators'], max_depth = params['max_depth'],random_state=42)
     rf.fit(X_train, y_train)
     y_pred_existing=rf.predict(X_test)
-    MSE = mean_squared_error(y_test, y_pred_existing)
+    #MSE = mean_squared_error(y_test, y_pred_existing)
 
     # View accuracy score
-    score = rf.score(X_test, y_pred_existing)
+    #score = rf.score(X_test, y_pred_existing)
 
     # Now the X variable is going to be the features for the days where we have no "in x Days price"
     last_days=data.tail(move_days)
-    X_pred=last_days.drop(['shift_close','Date'],1)
+    X_pred=last_days.drop(['shift_close','date','ticker','datetime'],1)
     
     #values for the next 7 days 
     pred=rf.predict(X_pred)
     #predicted_dates = data['Date']
     last_days['shift_close'] = pred
     
-    return last_days, MSE, score
+    return last_days
+try:
+    if len(data) > 3:
+        go = st.sidebar.button("Predict!")
+        if go == True:
+            with st.spinner(text='Calculating prediction ...'):
+                predicted =predict(data, move_days=predictframe)
+                
 
-if go == True:
-    with st.spinner(text='Calculating prediction ...'):
-        predicted, MSE, score =predict(data, move_days=predictframe)
+                #setting the index to date
+                predicted.index = predicted.date
 
-        #setting the index to date
-        predicted.index = predicted.Date
-
-        #shifting it back forward for x days
-        predicted.index = predicted.index.shift(predictframe, freq = "D")
-        st.write('Predicted values')
-        st.write(predicted[['Date','shift_close']])
+                #shifting it back forward for x days
+                predicted.index = predicted.index.shift(predictframe, freq = "D")
+                #st.write('Predicted values')
+                #st.write(predicted[['date','shift_close']])
+                hist.index = hist.date
+                #st.write(hist)
 
 
-        st.write('MSE:' + str(MSE))
-        st.write('Score:' + str(score))
+                #st.write('MSE:' + str(MSE))
+                #st.write('Score:' + str(score))
 
-        #joining with the historicaL data to create a subframe with just the new dates then appending that to the rest of the data but only take last 20 entries, sorted by date
-        graph = hist.append(hist.join(predicted[["Date", "shift_close"]], how= 'right')).sort_index().tail(20)
-        graph.rename(columns = {"shift_close":"Prediction", "Close":"Historical Data"}, inplace = True)
+                #joining with the historicaL data to create a subframe with just the new dates then appending that to the rest of the data but only take last 20 entries, sorted by date
+                graph = hist.append(hist.join(predicted[["date", "shift_close"]], how= 'right',   lsuffix='left', rsuffix='right')).sort_index().tail(20)
+                #st.write(graph)
+                graph.rename(columns = {"shift_close":"Prediction", "close":"Historical Data"}, inplace = True)
 
-        #plotting
-        fig2 = px.line(graph, x=graph.index, y=["Historical Data","Prediction"], title=f'Predicted closing price for {slct}', labels = {"index":"Date"}, template = 'seaborn', range_x = [min(graph.index),max(graph.index.shift(1, freq = "D"))])
-        fig2.update_traces(mode='markers+lines')
-        fig2.update_layout(xaxis_title='Date', yaxis_title='Closing Price [$]')
-        st.plotly_chart(fig2)
+                #plotting
+                fig2 = px.line(graph, x=graph.index, y=["Historical Data","Prediction"], title=f'Predicted closing price for {slct}', labels = {"index":"date"}, template = 'seaborn', range_x = [min(graph.index),max(graph.index.shift(1, freq = "D"))])
+                fig2.update_traces(mode='markers+lines')
+                fig2.update_layout(xaxis_title='Date', yaxis_title='Closing Price [$]')
+                st.plotly_chart(fig2)
+except:
+    pass
