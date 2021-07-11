@@ -4,7 +4,7 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 import finnhub
-from datetime import datetime
+from datetime import timedelta, datetime
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer as sia
 nltk.download("vader_lexicon")
@@ -35,6 +35,7 @@ finnhub_client = finnhub.Client(api_key="c2si65iad3ic1qis06lg")
 #streamlit interactibles and headings
 st.header('Using ML to predict the Stock Market')
 st.subheader('A Big Data Project by Valeriia, Louisa and Alexander')
+st.write('DISCLAIMER: This project is not meant to be serious financial advice.')
 
 #timeframe = st.sidebar.selectbox('Select period to display historical data:',['max','1d','5d','1mo','3mo','6mo','1y','2y','5y','10y','ytd'])
 
@@ -79,6 +80,7 @@ except:
     st.write('No financial data available')
 
 # building the data for prediction
+@st.cache
 def get_news(company, date_from='2021-06-01', date_to=None):
     '''
     returns dataframe with average sentiment of news headline and sentiment of news summary for every date in a given timeframe
@@ -123,9 +125,6 @@ except:
     pass
 
 
-
-
-
 def get_recommendation_trends(company):
     URL = 'https://finnhub.io/api/v1/stock/recommendation?symbol={}&token=c2si65iad3ic1qis06lg'.format(company)
     r = requests.get(URL)
@@ -154,7 +153,7 @@ with st.spinner(text='Fetching additional data ...'):
         add_all_ta_features(
         hist, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
     except:
-        pass
+        st.write("An error occurred, please try again later")
 
     try:
         trend_df = get_recommendation_trends(slct)
@@ -206,27 +205,37 @@ def predict(data, move_days=7):
 try:
     if go == True:
         with st.spinner(text='Calculating prediction ...'):
+            #run prediction
             predicted =predict(data, move_days=predictframe)
+            
+            #Prepare list of dates x days into the future
+            dates=[]
 
-            #setting the index to date
-            predicted.index = predicted.Date
+            for i in range(predictframe):
+                dates.append((datetime.now() + timedelta(days=i)))
+            
+            #make small dataframe of last 20 days historical data
+            df_hist = pd.DataFrame()
+            df_hist["Historical Data"] = hist.sort_index().Close.tail(20)
+            df_hist["Date"] = hist.sort_index().datetime.tail(20)
+            
+            #make small dataframe of predicted values + dates of next x days
+            df_pred=pd.DataFrame()
+            df_pred['Prediction']=predicted.shift_close.tail(predictframe)
+            df_pred['Date']=dates
+            
+            #join both
+            df_join = df_hist.append(df_pred)
+            df_join.set_index('Date',inplace = True)
 
-            #shifting it back forward for x days
-            predicted.index = predicted.index.shift(predictframe, freq = "D")
-            #st.write('Predicted values')
-            #st.write(predicted[['Date','shift_close']])
-
-            #joining with the historicaL data to create a subframe with just the new dates then appending that to the rest of the data but only take last 20 entries, sorted by date
-            hist.set_index('datetime',inplace = True)
-            hist.drop(['Date'],1,inplace=True)
-            joined = hist.join(predicted[["Date", "shift_close"]], how= 'right')
-            graph = hist.append(joined).sort_index().tail(20)
-            graph.rename(columns = {"shift_close":"Prediction", "Close":"Historical Data"}, inplace = True)
 
             #plotting
-            fig2 = px.line(graph, x=graph.index, y=["Historical Data","Prediction"], title=f'Predicted closing price for {slct}', labels = {"index":"Date"}, template = 'seaborn', range_x = [min(graph.index),max(graph.index.shift(1, freq = "D"))])
+            fig2 = px.line(df_join, x=df_join.index, y=["Historical Data","Prediction"], title=f'Predicted closing price for {slct}', template = 'seaborn', range_x = [min(df_join.index),max(df_join.index.shift(1, freq = "D"))])
             fig2.update_traces(mode='markers+lines')
             fig2.update_layout(xaxis_title='Date', yaxis_title='Closing Price [$]')
             st.plotly_chart(fig2)
+             
+
+        
 except:
-    pass
+    st.write("An error occurred, please try again later")
