@@ -1,0 +1,12 @@
+streamlit 
+yfinance 
+plotly
+pandas 
+numpy 
+datetime
+nltk 
+gensim
+ta
+sklearn
+requests 
+finnhub-python
